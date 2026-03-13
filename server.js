@@ -1,64 +1,61 @@
-import express from "express";
-import fetch from "node-fetch";
-import dotenv from "dotenv";
-import { Agent, Runner, withTrace } from "@openai/agents";
+app.post("/wati/webhook", async (req, res) => {
+  try {
+    console.log("Webhook bateu");
+    console.log("Payload WATI:", JSON.stringify(req.body, null, 2));
 
-dotenv.config();
+    res.status(200).send("ok");
 
-const app = express();
-app.use(express.json());
+    const text =
+      req.body?.text ||
+      req.body?.message ||
+      req.body?.data?.text ||
+      req.body?.conversation?.text ||
+      "";
 
-const myAgent = new Agent({
-  name: "Almeida Entulho Agent",
-  instructions: `SEU PROMPT REAL AQUI`,
-  model: "o3-mini",
-  modelSettings: {
-    reasoning: {
-      effort: "medium"
-    },
-    store: true
-  }
-});
+    const phone =
+      req.body?.whatsappNumber ||
+      req.body?.waId ||
+      req.body?.data?.waId ||
+      req.body?.data?.whatsappNumber ||
+      "";
 
-async function runAgent(text) {
-  const result = await withTrace("Almeida Entulho Workflow", async () => {
-    const runner = new Runner({
-      traceMetadata: {
-        __trace_source__: "agent-builder",
-        workflow_id: "SEU_WORKFLOW_ID"
-      }
+    console.log("Texto recebido:", text);
+    console.log("Telefone recebido:", phone);
+
+    if (!text || !phone) {
+      console.log("Sem texto ou telefone.");
+      return;
+    }
+
+    console.log("Antes de rodar agent");
+    const reply = await runAgent(text);
+    console.log("Depois de rodar agent");
+    console.log("Resposta gerada:", reply);
+
+    if (!reply || !String(reply).trim()) {
+      console.log("Resposta vazia do agent.");
+      return;
+    }
+
+    const watiSendUrl = `https://${process.env.WATI_HOST}/api/v1/sendSessionMessage/${phone}`;
+    console.log("Antes de enviar pro WATI");
+    console.log("URL WATI:", watiSendUrl);
+
+    const body = new URLSearchParams();
+    body.append("messageText", String(reply).trim());
+
+    const watiResponse = await fetch(watiSendUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `${process.env.WATI_API_KEY}`,
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: body.toString()
     });
 
-    return await runner.run(myAgent, text);
-  });
-
-  return result.finalOutput || "Olá! Me informa o local da entrega, por favor.";
-}
-
-app.post("/wati/webhook", async (req, res) => {
-  res.status(200).send("ok");
-
-  const text = req.body?.text || "";
-  const phone = req.body?.whatsappNumber || "";
-
-  if (!text || !phone) return;
-
-  const reply = await runAgent(text);
-
-  const body = new URLSearchParams();
-  body.append("messageText", String(reply));
-
-  await fetch(`https://${process.env.WATI_HOST}/api/v1/sendSessionMessage/${phone}`, {
-    method: "POST",
-    headers: {
-      Authorization: `${process.env.WATI_API_KEY}`,
-      "Content-Type": "application/x-www-form-urlencoded"
-    },
-    body: body.toString()
-  });
-});
-
-const PORT = Number(process.env.PORT) || 3000;
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
+    const watiData = await watiResponse.text();
+    console.log("Resposta do WATI:", watiData);
+  } catch (error) {
+    console.error("Erro no webhook:", error);
+  }
 });
