@@ -30,6 +30,8 @@ export function createApp() {
   const PORT = parsePort(process.env.PORT, 3000);
   const agentModel = process.env.OPENAI_MODEL || "gpt-4.1-mini";
   let assistant;
+  const conversationStore = new Map();
+  const HISTORY_LIMIT = 20;
 
   function getAssistant() {
     if (!process.env.OPENAI_API_KEY) {
@@ -69,9 +71,35 @@ export function createApp() {
     return { text: String(text).trim(), phone: String(phone).trim() };
   }
 
-  async function runAgent(userInput) {
+  function getConversationHistory(phone) {
+    const history = conversationStore.get(phone) || [];
+    return history.slice(-HISTORY_LIMIT);
+  }
+
+  function saveConversationTurn(phone, userMessage, assistantMessage) {
+    const history = getConversationHistory(phone);
+    history.push({ role: "user", content: String(userMessage || "") });
+    history.push({ role: "assistant", content: String(assistantMessage || "") });
+    conversationStore.set(phone, history.slice(-HISTORY_LIMIT));
+  }
+
+  function buildAgentInput(phone, userInput) {
+    const history = getConversationHistory(phone);
+    if (!history.length) {
+      return userInput;
+    }
+
+    const historyText = history
+      .map((item) => `${item.role === "assistant" ? "Assistant" : "Usuário"}: ${item.content}`)
+      .join("\n");
+
+    return `${historyText}\nUsuário: ${userInput}`;
+  }
+
+  async function runAgent(phone, userInput) {
     const activeAssistant = getAssistant();
-    const result = await run(activeAssistant, userInput);
+    const inputWithHistory = buildAgentInput(phone, userInput);
+    const result = await run(activeAssistant, inputWithHistory);
     return String(result.finalOutput || "").trim();
   }
 
@@ -123,9 +151,13 @@ export function createApp() {
       return;
     }
 
+    const history = getConversationHistory(phone);
+    console.log(`Telefone encontrado: ${phone}`);
+    console.log(`Histórico atual: ${history.length} mensagens`);
+
     let reply = "";
     try {
-      reply = await runAgent(text);
+      reply = await runAgent(phone, text);
       if (!reply) {
         console.log("Agent retornou resposta vazia. Enviando fallback.");
         reply = getFallbackMessage();
@@ -139,6 +171,8 @@ export function createApp() {
 
       reply = getFallbackMessage();
     }
+
+    saveConversationTurn(phone, text, reply);
 
     try {
       const sendResult = await sendMessageToWati(phone, reply);
