@@ -83,9 +83,37 @@ export function createApp() {
     conversationStore.set(phone, history.slice(-HISTORY_LIMIT));
   }
 
+  function classifyLocationInput(userInput) {
+    const digitsOnly = String(userInput || "").replace(/\D/g, "");
+
+    if (/^\d+$/.test(String(userInput || "").trim())) {
+      if (digitsOnly.length === 8) {
+        return { type: "cep_valido", normalized: digitsOnly };
+      }
+
+      if (digitsOnly.length === 7) {
+        return { type: "cep_invalido_7_digitos", normalized: digitsOnly };
+      }
+
+      return { type: "numerico_outro", normalized: digitsOnly };
+    }
+
+    return { type: "texto_endereco", normalized: String(userInput || "").trim() };
+  }
+
   function buildAgentInput(phone, userInput) {
     const history = getConversationHistory(phone);
+    const locationInfo = classifyLocationInput(userInput);
+
     if (!history.length) {
+      if (locationInfo.type === "cep_invalido_7_digitos") {
+        return `${userInput}\n\nObservação de validação: entrada numérica com 7 dígitos não é CEP válido.`;
+      }
+
+      if (locationInfo.type === "cep_valido") {
+        return `${userInput}\n\nObservação de validação: entrada numérica com 8 dígitos pode ser tratada como CEP válido.`;
+      }
+
       return userInput;
     }
 
@@ -93,7 +121,14 @@ export function createApp() {
       .map((item) => `${item.role === "assistant" ? "Assistant" : "Usuário"}: ${item.content}`)
       .join("\n");
 
-    return `${historyText}\nUsuário: ${userInput}`;
+    let locationHint = "";
+    if (locationInfo.type === "cep_invalido_7_digitos") {
+      locationHint = "\nValidação: número com 7 dígitos não é CEP válido.";
+    } else if (locationInfo.type === "cep_valido") {
+      locationHint = "\nValidação: número com 8 dígitos pode ser tratado como CEP válido.";
+    }
+
+    return `Conversa em andamento com mesmo telefone. Continue do ponto atual sem reiniciar com saudação padrão.\n${historyText}\nUsuário: ${userInput}${locationHint}`;
   }
 
   async function runAgent(phone, userInput) {
@@ -154,6 +189,10 @@ export function createApp() {
     const history = getConversationHistory(phone);
     console.log(`Telefone encontrado: ${phone}`);
     console.log(`Histórico atual: ${history.length} mensagens`);
+    console.log(`Tipo de conversa: ${history.length ? "continuação" : "nova"}`);
+
+    const locationInfo = classifyLocationInput(text);
+    console.log(`Classificação de localização: ${locationInfo.type}`);
 
     let reply = "";
     try {
