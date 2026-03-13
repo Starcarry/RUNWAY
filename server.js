@@ -14,6 +14,8 @@ app.get("/", (req, res) => {
 app.post("/wati/webhook", async (req, res) => {
   try {
     console.log("Payload WATI:", JSON.stringify(req.body, null, 2));
+
+    // responde rápido para o WATI
     res.status(200).send("ok");
 
     const text =
@@ -34,6 +36,9 @@ app.post("/wati/webhook", async (req, res) => {
       console.log("Sem texto ou telefone no payload.");
       return;
     }
+
+    console.log("Telefone recebido:", phone);
+    console.log("Texto recebido:", text);
 
     const openaiResponse = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
@@ -56,7 +61,10 @@ app.post("/wati/webhook", async (req, res) => {
 
     const watiSendUrl = `https://${process.env.WATI_HOST}/api/v1/sendSessionMessage/${phone}`;
 
-    await fetch(watiSendUrl, {
+    console.log("Resposta gerada:", reply);
+    console.log("URL WATI:", watiSendUrl);
+
+    const watiResponse = await fetch(watiSendUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -67,6 +75,8 @@ app.post("/wati/webhook", async (req, res) => {
       }),
     });
 
+    const watiData = await watiResponse.text();
+    console.log("Resposta do WATI:", watiData);
     console.log("Resposta enviada para o WATI.");
   } catch (error) {
     console.error("Erro:", error);
