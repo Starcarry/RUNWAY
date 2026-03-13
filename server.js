@@ -109,6 +109,10 @@ export function createApp() {
     });
   });
 
+  app.get("/wati/webhook", (_req, res) => {
+    res.status(200).send("webhook ok");
+  });
+
   app.post("/wati/webhook", async (req, res) => {
     console.log("Webhook recebido:", JSON.stringify(req.body, null, 2));
     res.status(200).send("ok");
