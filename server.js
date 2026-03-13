@@ -11,11 +11,30 @@ app.get("/", (req, res) => {
   res.send("Webhook online");
 });
 
+function extractReply(openaiData) {
+  if (openaiData?.output_text && openaiData.output_text.trim()) {
+    return openaiData.output_text.trim();
+  }
+
+  if (Array.isArray(openaiData?.output)) {
+    for (const item of openaiData.output) {
+      if (Array.isArray(item?.content)) {
+        for (const content of item.content) {
+          if (content?.type === "output_text" && content?.text?.trim()) {
+            return content.text.trim();
+          }
+        }
+      }
+    }
+  }
+
+  return "Olá! Recebi sua mensagem e já vou te ajudar.";
+}
+
 app.post("/wati/webhook", async (req, res) => {
   try {
     console.log("Payload WATI:", JSON.stringify(req.body, null, 2));
 
-    // responde rápido para o WATI
     res.status(200).send("ok");
 
     const text =
@@ -55,13 +74,16 @@ app.post("/wati/webhook", async (req, res) => {
     const openaiData = await openaiResponse.json();
     console.log("OpenAI:", JSON.stringify(openaiData, null, 2));
 
-    const reply =
-      openaiData.output_text ||
-      "Desculpe, tive um problema para responder agora.";
+    const reply = extractReply(openaiData);
+    console.log("Resposta gerada:", reply);
+
+    const cleanReply = String(reply).trim();
+    if (!cleanReply) {
+      console.log("Resposta vazia após limpeza.");
+      return;
+    }
 
     const watiSendUrl = `https://${process.env.WATI_HOST}/api/v1/sendSessionMessage/${phone}`;
-
-    console.log("Resposta gerada:", reply);
     console.log("URL WATI:", watiSendUrl);
 
     const watiResponse = await fetch(watiSendUrl, {
@@ -71,7 +93,7 @@ app.post("/wati/webhook", async (req, res) => {
         Authorization: `${process.env.WATI_API_KEY}`,
       },
       body: JSON.stringify({
-        messageText: reply,
+        messageText: cleanReply,
       }),
     });
 
