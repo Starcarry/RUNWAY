@@ -32,6 +32,9 @@ export function createApp() {
   let assistant;
   const conversationStore = new Map();
   const HISTORY_LIMIT = 20;
+  const processedEventIds = new Set();
+  const processedEventOrder = [];
+  const EVENT_DEDUP_LIMIT = 500;
 
   function getAssistant() {
     if (!process.env.OPENAI_API_KEY) {
@@ -99,6 +102,69 @@ export function createApp() {
     }
 
     return { type: "texto_endereco", normalized: String(userInput || "").trim() };
+  }
+
+  function extractEventMetadata(payload) {
+    const eventId = String(
+      payload?.id ||
+        payload?.messageId ||
+        payload?.eventId ||
+        payload?.data?.id ||
+        payload?.data?.messageId ||
+        ""
+    ).trim();
+
+    const eventType = String(
+      payload?.eventType || payload?.event || payload?.type || payload?.data?.eventType || payload?.data?.type || "unknown"
+    ).trim();
+
+    const directionRaw =
+      payload?.direction ??
+      payload?.messageDirection ??
+      payload?.data?.direction ??
+      payload?.data?.messageDirection ??
+      payload?.fromMe ??
+      payload?.isFromMe ??
+      payload?.data?.fromMe ??
+      payload?.data?.isFromMe;
+
+    const direction = String(directionRaw ?? "unknown").toLowerCase();
+
+    return { eventId, eventType, direction };
+  }
+
+  function isOutgoingOrNonUserEvent(payload, text, metadata) {
+    const type = String(metadata?.eventType || "").toLowerCase();
+    const direction = String(metadata?.direction || "").toLowerCase();
+
+    if (direction === "true" || direction === "out" || direction === "outgoing" || direction === "sent") {
+      return { ignore: true, reason: "saida" };
+    }
+
+    if (type.includes("status") || type.includes("delivery") || type.includes("read")) {
+      return { ignore: true, reason: "status" };
+    }
+
+    if (!text) {
+      return { ignore: true, reason: "sem_texto_util" };
+    }
+
+    return { ignore: false, reason: "ok" };
+  }
+
+  function markEventAsProcessed(eventId) {
+    if (!eventId) return;
+    if (processedEventIds.has(eventId)) return;
+
+    processedEventIds.add(eventId);
+    processedEventOrder.push(eventId);
+
+    if (processedEventOrder.length > EVENT_DEDUP_LIMIT) {
+      const oldest = processedEventOrder.shift();
+      if (oldest) {
+        processedEventIds.delete(oldest);
+      }
+    }
   }
 
   function buildAgentInput(phone, userInput) {
@@ -181,13 +247,32 @@ export function createApp() {
     res.status(200).send("ok");
 
     const { text, phone } = extractInboundMessage(req.body);
-    if (!text || !phone) {
-      console.log("Evento ignorado: payload sem texto ou telefone.");
+    const metadata = extractEventMetadata(req.body);
+
+    console.log(`Telefone extraído: ${phone || "nao_informado"}`);
+    console.log(`Tipo/evento recebido: ${metadata.eventType}`);
+
+    if (!phone) {
+      console.log("Evento ignorado: telefone ausente.");
       return;
     }
 
+    if (metadata.eventId && processedEventIds.has(metadata.eventId)) {
+      console.log(`Evento ignorado: duplicado (${metadata.eventId}).`);
+      return;
+    }
+
+    const eventDecision = isOutgoingOrNonUserEvent(req.body, text, metadata);
+    if (eventDecision.ignore) {
+      console.log(`Evento ignorado: ${eventDecision.reason}.`);
+      return;
+    }
+
+    if (metadata.eventId) {
+      markEventAsProcessed(metadata.eventId);
+    }
+
     const history = getConversationHistory(phone);
-    console.log(`Telefone encontrado: ${phone}`);
     console.log(`Histórico atual: ${history.length} mensagens`);
     console.log(`Tipo de conversa: ${history.length ? "continuação" : "nova"}`);
 
