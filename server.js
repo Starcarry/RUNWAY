@@ -34,7 +34,6 @@ function extractReply(openaiData) {
 app.post("/wati/webhook", async (req, res) => {
   try {
     console.log("Payload WATI:", JSON.stringify(req.body, null, 2));
-
     res.status(200).send("ok");
 
     const text =
@@ -75,26 +74,32 @@ app.post("/wati/webhook", async (req, res) => {
     console.log("OpenAI:", JSON.stringify(openaiData, null, 2));
 
     const reply = extractReply(openaiData);
-    console.log("Resposta gerada:", reply);
-
     const cleanReply = String(reply).trim();
+
     if (!cleanReply) {
       console.log("Resposta vazia após limpeza.");
       return;
     }
 
+    console.log("Resposta gerada:", cleanReply);
+
     const watiSendUrl = `https://${process.env.WATI_HOST}/api/v1/sendSessionMessage/${phone}`;
     console.log("URL WATI:", watiSendUrl);
+
+    // WATI v1 costuma ler melhor como x-www-form-urlencoded / form-data
+    const body = new URLSearchParams();
+    body.append("messageText", cleanReply);
+
+    // Se sua conta tiver múltiplos números conectados, descomente e preencha:
+    // body.append("channelPhoneNumber", process.env.WATI_CHANNEL_PHONE_NUMBER);
 
     const watiResponse = await fetch(watiSendUrl, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
         Authorization: `${process.env.WATI_API_KEY}`,
+        "Content-Type": "application/x-www-form-urlencoded",
       },
-      body: JSON.stringify({
-        messageText: cleanReply,
-      }),
+      body: body.toString(),
     });
 
     const watiData = await watiResponse.text();
